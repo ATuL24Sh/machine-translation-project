@@ -1,0 +1,255 @@
+!pip install datasets
+!pip install transformers
+!pip install evaluate
+!pip install sacrebleu
+!pip install --upgrade --no-cache-dir gdown
+# import locale
+# locale.getpreferredencoding = lambda: "UTF-8"
+!pip install --upgrade transformers
+from datasets import load_dataset
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, Seq2SeqTrainingArguments, Seq2SeqTrainer, DataCollatorForSeq2Seq
+import evaluate
+from sklearn.model_selection import train_test_split
+import numpy as np
+import pandas as pd
+from datasets import load_dataset, Dataset
+import pandas as pd
+
+dataset = load_dataset("csv", data_files="C:/Users/91787/Programming/Jupyter/Data/EN-FR/train.csv")
+dataset['train'][8]
+
+val_data = pd.read_csv('C:\\Users\\91787\\Programming\\Jupyter\\Data\\EN-FR\\dev.csv')
+ds_val = Dataset.from_pandas(val_data)
+
+test_data = pd.read_csv('C:\\Users\\91787\\Programming\\Jupyter\\Data\\EN-FR\\test.csv')
+ds_test = Dataset.from_pandas(test_data)
+
+dataset["validation"] = ds_val
+dataset["test"] = ds_test
+
+dataset
+
+model_name = "t5-small"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+tokenizer(['At length, however, the remarks of her companions on her absence of mind aroused her, and she felt the necessity of appearing more like herself.'])
+
+source_lang = "en"
+target_lang = "fr"
+prefix = "translate English to French: "
+
+def preprocess_function(examples):
+    inputs = [prefix + example for example in examples[source_lang]]
+    targets = [example for example in examples[target_lang]]
+    model_inputs = tokenizer(inputs, text_target=targets, max_length=128, truncation=True)
+    return model_inputs
+tokenized_data = dataset.map(preprocess_function, batched=True)
+
+print(tokenized_data['train'][10])
+
+data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model_name)
+
+metric = evaluate.load("sacrebleu")
+
+def postprocess_text(preds, labels):
+    preds = [pred.strip() for pred in preds]
+    labels = [[label.strip()] for label in labels]
+
+    return preds, labels
+
+
+def compute_metrics(eval_preds):
+    preds, labels = eval_preds
+    if isinstance(preds, tuple):
+        preds = preds[0]
+    decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
+
+    labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+    decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+
+    decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
+
+    result = metric.compute(predictions=decoded_preds, references=decoded_labels)
+    result = {"bleu": result["score"]}
+
+    result = {k: round(v, 4) for k, v in result.items()}
+    return result
+!pip install torch
+!pip install torch==1.12.1
+
+import torch
+
+print(torch.__version__)
+
+from transformers import AutoModelForSeq2SeqLM
+
+model = AutoModelForSeq2SeqLM.from_pretrained(model_name).to("cpu")
+pip install accelerate -U
+!pip install tensorboard
+
+import torch
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, Seq2SeqTrainingArguments, Seq2SeqTrainer
+from datasets import load_dataset
+
+# Load your dataset here
+dataset = load_dataset("csv", data_files="C:/Users/91787/Programming/Jupyter/Data/EN-FR/train.csv")
+
+# Split dataset into training and validation sets
+split_percentage = 0.9
+train_dataset = dataset["train"].train_test_split(test_size=(1 - split_percentage))["train"]
+eval_dataset = dataset["train"].train_test_split(test_size=(1 - split_percentage))["test"]
+
+# Tokenize and preprocess your datasets
+def tokenization_and_preprocessing(model_name, dataset):
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+    def preprocess_function(examples):
+        inputs = examples["en"]
+        targets = examples["fr"]
+
+        model_inputs = tokenizer(inputs, max_length=128, padding="max_length", truncation=True)
+        model_inputs["labels"] = tokenizer(targets, max_length=128, padding="max_length", truncation=True)["input_ids"]
+
+        return model_inputs
+
+    tokenized_train_data = train_dataset.map(preprocess_function, batched=True)
+    tokenized_eval_data = eval_dataset.map(preprocess_function, batched=True)
+
+    return tokenized_train_data, tokenized_eval_data
+
+# Tokenize and preprocess the dataset
+model_name = 'facebook/bart-base'
+tokenized_train_data, tokenized_eval_data = tokenization_and_preprocessing(model_name, dataset)
+
+# Data collator
+def data_collator(batch):
+    input_ids = torch.stack([torch.tensor(example["input_ids"]) for example in batch])
+    attention_mask = torch.stack([torch.tensor(example["attention_mask"]) for example in batch])
+    labels = torch.stack([torch.tensor(example["labels"]) for example in batch])
+
+    return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+
+# Initialize the model
+model = AutoModelForSeq2SeqLM.from_pretrained(model_name).to("cpu")
+
+# Training arguments
+training_args = Seq2SeqTrainingArguments(
+    output_dir="./results",
+    evaluation_strategy="epoch",
+    learning_rate=2e-5,
+    per_device_train_batch_size=1,  # Lower batch size to fit in CPU memory
+    per_device_eval_batch_size=1,   # Lower batch size for evaluation
+    predict_with_generate=True,
+    save_total_limit=3,
+    num_train_epochs=1,             # Reduce training epochs to 1
+    fp16=False,                     # Disable mixed-precision training
+    report_to=None,                 # Disable Tensorboard reporting
+    push_to_hub=False,
+)
+
+# Initialize trainer
+trainer = Seq2SeqTrainer(
+    model=model,
+    args=training_args,
+    data_collator=data_collator,
+    train_dataset=tokenized_train_data,
+    eval_dataset=tokenized_eval_data,
+    tokenizer=AutoTokenizer.from_pretrained(model_name),
+)
+
+# Train the model
+trainer.train()
+
+
+print("Tokenized Train Data Info:", tokenized_train_data)
+print("Tokenized Eval Data Info:", tokenized_eval_data)
+# Save the trained model and tokenizer
+trainer.save_model("./seq2seq_model")  # This saves both the model and the tokenizer
+
+!cp -r /content/T5_checkpoint /content/drive/MyDrive/
+
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+
+# Load the tokenizer and model
+model_name = 'facebook/bart-base'
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForSeq2SeqLM.from_pretrained("./seq2seq_model")
+
+
+def predict(sentence, model, tokenizer):
+    inputs = tokenizer(sentence, return_tensors="pt").input_ids
+    outputs = model.generate(inputs, max_new_tokens=40, do_sample=True, top_k=30, top_p=0.95)
+    decoded_outputs = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    return decoded_outputs
+
+# Example sentences
+text = "As the sun began to set, casting long shadows across the fields, a solitary figure emerged from the woods. Dressed in a long, dark cloak, the figure walked with a sense of purpose, their footsteps crunching softly on the fallen leaves."
+text2 = "The wind whipped through the trees, sending shivers down my spine. The leaves swirled around me, dancing in the air like a thousand tiny spirits. I closed my eyes and took a deep breath, letting the fresh air fill my lungs."
+text3 = 'The waves crashed against the shore, their roar echoing through the night. The moonlight shimmered on the water, creating a magical scene. I sat on the sand, watching the waves roll in and out, and felt a sense of peace wash over me.'
+
+# Predict translations
+pred1 = predict(text, model, tokenizer)
+print(f"Input: {text}\nTranslated: {pred1}\n")
+
+pred2 = predict(text2, model, tokenizer)
+print(f"Input: {text2}\nTranslated: {pred2}\n")
+
+pred3 = predict(text3, model, tokenizer)
+print(f"Input: {text3}\nTranslated: {pred3}\n")
+
+from sacrebleu import corpus_bleu
+from rouge_score import rouge_scorer
+
+# Example reference translations
+references = [
+    ["Legumes share resources with nitrogen-fixing bacteria."],
+    ["My name is John."],
+    ["He died."]
+]
+
+# Example predicted translations
+hypotheses = [
+    "Legumes share resources with bacteria that fix nitrogen.",
+    "I am John.",
+    "He passed away."
+]
+
+# Calculate BLEU score
+bleu = corpus_bleu(hypotheses, references)
+print(f"BLEU Score: {bleu.score}")
+
+# Calculate ROUGE scores
+rouge_scorer_instance = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
+
+# Convert references to strings
+references_str = [ref[0] for ref in references]
+
+rouge_scores = [rouge_scorer_instance.score(h, references_str[i]) for i, h in enumerate(hypotheses)]
+average_rouge = {metric: sum(score[metric].fmeasure for score in rouge_scores) / len(rouge_scores) for metric in rouge_scores[0]}
+print(f"Average ROUGE Scores: {average_rouge}")
+
+from nltk.translate.meteor_score import single_meteor_score
+
+# Example reference translations
+references = [
+    ["Legumes share resources with nitrogen-fixing bacteria."],
+    ["My name is John."],
+    ["He died."]
+]
+
+# Example predicted translations
+hypotheses = [
+    "Legumes share resources with bacteria that fix nitrogen.",
+    "I am John.",
+    "He passed away."
+]
+
+# Tokenize references
+tokenized_references = [[word.lower() for word in ref[0].split()] for ref in references]
+
+# Tokenize hypotheses
+tokenized_hypotheses = [[word.lower() for word in hypothesis.split()] for hypothesis in hypotheses]
+
+# Calculate METEOR score
+meteor_scores = [single_meteor_score(h, r) for h, r in zip(tokenized_hypotheses, tokenized_references)]
+average_meteor = sum(meteor_scores) / len(meteor_scores)
+print(f"Average METEOR Score: {average_meteor}")
