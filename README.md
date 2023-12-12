@@ -26,4 +26,3 @@ with the hidden vector of the current time step.
 
 3. Result Analysis
    ![image](https://github.com/ATuL24Sh/machine-translation-project/assets/153619401/8e1846bd-aee3-4168-9c61-e38c847d9b56)
-
